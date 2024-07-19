@@ -104,7 +104,7 @@ func getVaultClient(ctx context.Context) (*vault.Client, error) {
 
 func getWrappingKey(ctx context.Context, client *vault.Client, mountName string) (string, error) {
 	// get transit SE wrapping key
-	path := "/"+ mountName + "/wrapping_key"
+	path := "/" + mountName + "/wrapping_key"
 	resp, err := client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
 		return "", err
