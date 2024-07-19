@@ -41,12 +41,27 @@ func importKeyCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			kvEngineMountName, err := cmd.Flags().GetString("kv_name")
+			if err != nil {
+				return err
+			}
+			transitKeyName, err := cmd.Flags().GetString("transit_key_name")
+			if err != nil {
+				return err
+			}
+			if len(transitKeyName) == 0 {
+				transitKeyName = keyName
+			}
+			transitEngineMountName, err := cmd.Flags().GetString("transit_name")
+			if err != nil {
+				return err
+			}
 			vaultClient, err := getVaultClient(ctx)
 			if err != nil {
 				return err
 			}
 			fmt.Println("Successfully got vault client")
-			wrappingKey, err := getWrappingKey(ctx, vaultClient)
+			wrappingKey, err := getWrappingKey(ctx, vaultClient, transitEngineMountName)
 			if err != nil {
 				return err
 			}
@@ -55,11 +70,11 @@ func importKeyCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := importKeyToTransit(ctx, vaultClient, ciphertext, keyName); err != nil {
+			if err := importKeyToTransit(ctx, vaultClient, ciphertext, transitKeyName, transitEngineMountName); err != nil {
 				return err
 			}
 			fmt.Println("Successfully imported key to transit")
-			if err := importCertToKV(ctx, vaultClient, certPath, keyName); err != nil {
+			if err := importCertToKV(ctx, vaultClient, certPath, keyName, kvEngineMountName); err != nil {
 				return err
 			}
 			fmt.Println("Successfully imported cert to kv")
@@ -69,6 +84,9 @@ func importKeyCommand() *cobra.Command {
 	importKeyCmd.Flags().String("key_path", "", "absolute path to the private key file")
 	importKeyCmd.Flags().String("cert_path", "", "absolute path to the certificate chain file")
 	importKeyCmd.Flags().String("key_name", "", "name of the key")
+	importKeyCmd.Flags().String("kv_name", "secret", "name of the KVv2 secret engine mount")
+	importKeyCmd.Flags().String("transit_key_name", "", "name of the key in transit engine")
+	importKeyCmd.Flags().String("transit_name", "transit", "name of the transit engine mount")
 	return importKeyCmd
 }
 
@@ -84,9 +102,9 @@ func getVaultClient(ctx context.Context) (*vault.Client, error) {
 	})
 }
 
-func getWrappingKey(ctx context.Context, client *vault.Client) (string, error) {
+func getWrappingKey(ctx context.Context, client *vault.Client, mountName string) (string, error) {
 	// get transit SE wrapping key
-	path := "/transit/wrapping_key"
+	path := "/"+ mountName + "/wrapping_key"
 	resp, err := client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
 		return "", err
@@ -140,8 +158,8 @@ func wrapPrivateKey(wrappingKey string, privateKeyPath string) (string, error) {
 	return base64Ciphertext, nil
 }
 
-func importKeyToTransit(ctx context.Context, client *vault.Client, ciphertext string, keyName string) error {
-	path := fmt.Sprintf("/transit/keys/%s/import", keyName)
+func importKeyToTransit(ctx context.Context, client *vault.Client, ciphertext string, keyName string, engineMount string) error {
+	path := fmt.Sprintf("/%s/keys/%s/import", engineMount, keyName)
 	req := map[string]interface{}{
 		"allow_plaintext_backup": false,
 		"allow_rotation":         false,
@@ -158,7 +176,7 @@ func importKeyToTransit(ctx context.Context, client *vault.Client, ciphertext st
 	return err
 }
 
-func importCertToKV(ctx context.Context, client *vault.Client, certPath string, keyName string) error {
+func importCertToKV(ctx context.Context, client *vault.Client, certPath string, keyName string, engineMount string) error {
 	certFile, err := os.Open(certPath)
 	if err != nil {
 		return err
@@ -169,6 +187,6 @@ func importCertToKV(ctx context.Context, client *vault.Client, certPath string, 
 	}
 	data := make(map[string]interface{})
 	data["certificate"] = string(bytes)
-	_, err = client.KVv2("secret").Put(ctx, keyName, data)
+	_, err = client.KVv2(engineMount).Put(ctx, keyName, data)
 	return err
 }
